@@ -1,0 +1,204 @@
+---
+title: "R Notebook"
+author: "Danilo Cardoso dos Santos"
+output: html_notebook
+---
+
+```{r, message=F, warning = F}
+library(tidyverse)
+library(lubridate)
+library(readxl)
+library(arules)
+library(arulesViz) 
+```
+
+
+```{r, warning = F, message = F}
+# Accidents features
+Accident <- read_excel("ACCIDENT.xlsx", "ACCIDENT")
+
+# Accident selected features 
+Accident <- Accident %>% 
+  select(c(1,2,12,13,14,15,16,17,33,36,39,51,52))
+
+ # Person features
+Person <- read_excel("PERSON.xlsx", "PERSON")
+
+# Person selected features
+Person <- Person %>% 
+  select(c(2,11,13,14,16,17,23,24,25,31,35,47,58))
+
+# State Names
+State_Name <- read_excel("ACCIDENT.xlsx", "STATE")
+
+# Make (Ford, Chevrolet)
+Make <- read_excel("PERSON.xlsx", "MAKE")
+
+# Intersection Label (Four-way, Two-way)
+Intersection_type <- read_excel("ACCIDENT.xlsx", "TYP_INT")
+
+# Alcohol Label No (Alcohol Not Involved, Yes (Alcohol Involved)
+Drinking <- read_excel("PERSON.xlsx", "Drinking")
+
+# Air bag Label (Deployed, NOt Deployed)
+Air_bag <- read_excel("PERSON.xlsx", "AIR_BAG")
+
+# Light Condition Label (Daylight, Dark - Not Lighted)
+Light_condition <- read_excel("ACCIDENT.xlsx", "LGT_COND")
+
+# Collision (Front-to-Rear, Front-to-Front)
+Collision <- read_excel("MAN_COLL.xlsx")
+
+```
+
+
+```{r, message=F, warning=F}
+# Join tables
+All <- Accident %>%
+  left_join(State_Name, by = "STATE") %>% 
+  left_join(Person, by = "ST_CASE") %>% 
+  left_join(Intersection_type, by =  c("TYP_INT" = "ID")) %>%  
+  left_join(Drinking, by = c("DRINKING" = "ID")) %>% 
+  left_join(Make, by = c("MAKE" = "ID")) %>% 
+  left_join(Air_bag, by = c("AIR_BAG" = "ID")) %>% 
+  left_join(Light_condition, by = c("LGT_COND" = "ID")) %>% 
+  #left_join(Vehicle) %>% 
+  #left_join(VehicleType, by = c("MAKE" = "ID")) %>% 
+  left_join(Collision, by = c("MAN_COLL" = "ID")) %>%
+  #left_join(Crash, by = c("P_CRASH1" = "ID")) %>% 
+  #left_join(Vehicle, by = "ST_CASE")
+  
+  mutate(AirBagDeployment =
+           case_when(
+                AIR_BAG_Name %in% c("Deployed-Front",
+                                    "Deployed-Combination",
+                                    "Deployed-Curtain (roof)",
+                                    "Deployed-Side (door, seatback)",
+                                    "Deployment-Unknown Location",
+                                    "Deployed-Other (knee, air belt, etc.)") ~ "Deployed",
+                AIR_BAG_Name == "Not Deployed"~"Not Deployed",
+                AIR_BAG_Name  %in% c("Reported as Deployment Unknown","Not Reported")~"Not Reported",
+                TRUE~as.character(AIR_BAG_Name)),
+    
+                AgeGroup = case_when(
+                       AGE <  20~"< 20",
+                       AGE <= 30~"21 - 30",
+                       AGE <= 40~"31 - 40",
+                       AGE <= 50~"41 - 50",
+                       AGE <= 60~"51 - 60",
+                       AGE <= 70~"61 - 70",
+                       AGE <= 80~"71 - 80",
+                       AGE <= 90~"81 - 90",
+                       AGE >  90~"> 90",
+                       AGE == 998~"Not Reported",
+                       AGE == 999~"Unknown",
+                       TRUE~as.character(AGE)),
+        
+                # Values to Sort the AgeGroup
+                SortAgeGroup = case_when(
+                       AgeGroup == "< 20"~0,
+                       AgeGroup == "21 - 30"~1,
+                       AgeGroup == "31 - 40"~2,
+                       AgeGroup == "41 - 50"~3,
+                       AgeGroup == "51 - 60"~4,
+                       AgeGroup == "61 - 70"~5,
+                       AgeGroup == "71 - 80"~6,
+                       AgeGroup == "81 - 90"~7,
+                       AgeGroup == "> 90"~8,
+                       AgeGroup == "Not Reported"~9,
+                       AgeGroup == "Unknown"~10,
+                       TRUE~as.numeric(AgeGroup)),
+                
+                SexLabel = case_when(
+                       SEX == 1 ~"Male",
+                       SEX == 2 ~"Female",
+                       SEX == 8 ~"Unknwon",
+                SEX == 9 ~"Unknwon",
+                TRUE~as.character(SEX)),
+        
+                Date = make_date(YEAR, MONTH, DAY),
+            
+                MonthName = month(Date, label = T),
+                
+                       DayWeekName = case_when(
+                       DAY_WEEK == 1 ~"Sunday",
+                       DAY_WEEK == 2 ~"Monday",
+                       DAY_WEEK == 3 ~"Tuesday",
+                       DAY_WEEK == 4 ~"Wednesday",
+                       DAY_WEEK == 5 ~"Thursday",
+                       DAY_WEEK == 6 ~"Friday",
+                       DAY_WEEK == 7 ~"Saturday",
+                       TRUE~as.character(SEX))
+        
+          )
+# Save CSV File
+#write.csv(All, "All.csv")
+
+```
+
+```{r}
+# Reduce dataset for Association Rules
+ds_small <- All %>% 
+  filter(!is.na(MOD_YEAR) & VehicleType != "Motored Cycle/Moped" &
+        Model_Name %in% c("Kia","Mercedes-Benz","Audi","BMW","Chevrolet","Ford","Hyundai","Toyota","Volkswagen","Volvo","Subaru","Honda")) %>% 
+    select(MOD_YEAR,
+           Model_Name,
+           AirBagDeployment,
+           Collision,
+           VehicleType)
+
+```
+
+
+```{r}
+ds_small %>% 
+  filter(Model_Name %in% c("Kia","Mercedes-Benz","Audi","BMW","Chevrolet","Ford","Hyundai","Toyota","Volkswagen","Volvo","Subaru","Honda")) %>% 
+  count(Model_Name, sort = T) %>% 
+  mutate(Prop = n/sum(n) * 100) %>% 
+  rename(Total = n)
+```
+
+
+
+```{r}
+  ds_small %>% 
+     filter(AirBagDeployment != "Not Reported" & VehicleType != "Motored Cycle/Moped" & 
+            Model_Name %in% c("Kia","Mercedes-Benz","Audi","BMW","Chevrolet","Ford","Hyundai","Toyota","Volkswagen","Volvo","Subaru","Honda"))%>% 
+     count(Model_Name, AirBagDeployment)%>% 
+     spread(AirBagDeployment, n) %>% 
+  mutate(ProportionNotDeployed = `Not Deployed`/(Deployed + `Not Deployed`)) %>% 
+  arrange(desc(ProportionNotDeployed)) 
+```
+
+
+```{r}
+
+# Convert to Factor
+ds_small <- map_df(ds_small, as.factor) 
+
+# Convert to Transaction Dataset
+ds_tr <- as(ds_small, "transactions")
+
+# Create Rules
+deployment_rules <- apriori(ds_tr,
+                        parameter = list(supp = 0.02, 
+                                         conf = 0.5),
+                        appearance = list(rhs = "AirBagDeployment=Not Deployed"))
+
+
+# Result
+deployment_rules %>%
+  sort(. , by = "lift") %>%
+  head(20) %>%
+  inspect()
+
+
+inspectDT(deployment_rules,10)
+
+
+plot(deployment_rules, method="graph",
+     control = list(type="itens"),
+     engine="htmlwidget")
+```
+
+
